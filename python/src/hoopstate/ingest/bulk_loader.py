@@ -334,8 +334,15 @@ def stream_archive_to_typed_parquet(
     return typed.height
 
 
-def _archive_path(profile: StorageProfile, name: str) -> Path:
-    return profile.zone(Zone.RAW) / f"{name}.tar.xz"
+def _archive_path(profile: StorageProfile, name: str, archive_dir: Path | None = None) -> Path:
+    """Where ``name``'s archive lives. Defaults to the raw zone.
+
+    ``archive_dir`` overrides that directory. It exists so a caller that owns a
+    zone of its own can keep an archive there instead of among the core-model
+    sources; this function stays incurious about why.
+    """
+    directory = profile.zone(Zone.RAW) if archive_dir is None else archive_dir
+    return directory / f"{name}.tar.xz"
 
 
 def _parquet_path(profile: StorageProfile, name: str, parsed: ParsedName) -> Path:
@@ -350,6 +357,7 @@ def ensure_archive(
     profile: StorageProfile | None = None,
     manifest: dict[str, str] | None = None,
     force: bool = False,
+    archive_dir: Path | None = None,
 ) -> ArchiveRef:
     """Ensure the raw archive for ``name`` is present and verified on disk.
 
@@ -361,6 +369,9 @@ def ensure_archive(
     This is the download/cache half of :func:`load_dataset`, factored out so the
     bronze conversion can obtain the raw archive without also producing the
     loader's lossless string-parquet capture.
+
+    ``archive_dir`` overrides where the archive and its checksum sidecar land;
+    it defaults to the raw zone.
     """
     if profile is None:
         profile = resolve_profile()
@@ -370,7 +381,7 @@ def ensure_archive(
         raise KeyError(f"dataset {name!r} is not in the manifest")
 
     url = manifest[name]
-    archive_path = _archive_path(profile, name)
+    archive_path = _archive_path(profile, name, archive_dir)
     sidecar = archive_path.with_name(archive_path.name + ".sha256")
 
     have_valid_cache = (
