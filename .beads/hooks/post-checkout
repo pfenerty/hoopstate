@@ -1,7 +1,7 @@
 #!/bin/sh
 # tokensave: auto-init
 if [ "$1" = "0000000000000000000000000000000000000000" ]; then
-	/Users/patrickfenerty/.local/bin/tokensave init >/dev/null 2>&1 &
+	command -v tokensave >/dev/null 2>&1 && tokensave init >/dev/null 2>&1 &
 fi
 
 # --- BEGIN BEADS INTEGRATION v1.0.3 ---
