@@ -1,4 +1,6 @@
-# nbaviz
+# hoopstate
+
+**Reconstructing the state the box score never records.**
 
 A richer model derived from public NBA play-by-play data.
 
@@ -15,7 +17,7 @@ versioned analysis marts.
 ## Layout
 
 ```
-python/src/nbaviz/   ingest/ model/ derive/ validate/ db/
+python/src/hoopstate/   ingest/ model/ derive/ validate/ db/
 rust/                added at port time — see rust/README.md
 docs/research/       findings from the research spikes
 tests/fixtures/      golden games as small committed parquet

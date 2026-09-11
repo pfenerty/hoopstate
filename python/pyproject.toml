@@ -1,5 +1,5 @@
 [project]
-name = "nbaviz"
+name = "hoopstate"
 version = "0.1.0"
 description = "A richer model derived from public NBA play-by-play data"
 requires-python = ">=3.14"
@@ -38,7 +38,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nbaviz"]
+packages = ["src/hoopstate"]
 
 [tool.ruff]
 line-length = 100
