@@ -146,8 +146,8 @@ def test_join_report_empty_left_is_a_perfect_rate_not_a_crash() -> None:
     assert report.unmatched_sample == ()
 
 
-def test_join_report_format_mentions_both_failure_modes() -> None:
-    text = join_report(
+def _join_text() -> str:
+    return join_report(
         _SHOTDETAIL,
         _NBASTATS,
         left_on=["GAME_ID", "GAME_EVENT_ID"],
@@ -156,9 +156,38 @@ def test_join_report_format_mentions_both_failure_modes() -> None:
         left_label="shots",
         right_label="events",
     ).format()
+
+
+def test_join_report_format_mentions_both_failure_modes() -> None:
+    text = _join_text()
     assert "shot_join" in text
-    assert "unmatched" in text
-    assert "duplicate rhs keys" in text
+    assert "rows matching nothing" in text
+    # Named against the actual dataset, not an opaque "rhs".
+    assert "duplicate keys in events" in text
+
+
+def test_join_report_format_is_an_aligned_table() -> None:
+    lines = _join_text().splitlines()
+    header = next(i for i, line in enumerate(lines) if line.strip().startswith("metric"))
+    assert set(lines[header + 1].strip()) <= {"-", " "}
+    body = [line for line in lines[header + 2 : header + 6]]
+    assert len(body) == 4
+    # Values are right-aligned, so every count ends in the same column and a
+    # magnitude outlier is visible without reading the numbers.
+    value_col = lines[header].index("value") + len("value")
+    for line in body:
+        assert line[value_col - 1] != " ", f"value not right-aligned to {value_col}: {line!r}"
+
+
+def test_join_report_sample_is_sorted_for_diffable_reruns() -> None:
+    report = join_report(
+        _SHOTDETAIL,
+        _NBASTATS,
+        left_on=["GAME_ID", "GAME_EVENT_ID"],
+        right_on=["GAME_ID", "EVENTNUM"],
+        name="j",
+    )
+    assert list(report.unmatched_sample) == sorted(report.unmatched_sample)
 
 
 # --- key_coverage -----------------------------------------------------------
@@ -201,7 +230,67 @@ def test_key_coverage_reports_reference_groups_with_no_rows() -> None:
     assert report.reference_units == 3
     assert report.missing_units == 1
     assert report.missing_sample == (("G3",),)
-    assert "2 of 3" in report.format()
+    text = report.format()
+    assert "of 3 expected" in text
+    assert "games with no rows" in text
+    assert "G3" in text
+
+
+def test_key_coverage_names_the_extreme_groups() -> None:
+    # G1 has three distinct players and G2 has two; knowing *which* game is the
+    # outlier is the difference between a number and something investigable.
+    report = key_coverage(
+        _MATCHUPS,
+        group_by=["game_id"],
+        value_columns=["person_id", "matchups_person_id"],
+        name="c",
+        dataset="matchups_2023",
+        unit="game",
+        measure="distinct players",
+    )
+    assert report.minimum_key == ("G2",)
+    assert report.maximum_key == ("G1",)
+
+
+def test_key_coverage_ties_resolve_to_the_first_key() -> None:
+    # Both games have exactly two distinct players, so the reported extreme must
+    # be stable across runs rather than whatever the group-by happened to emit.
+    tied = pl.DataFrame(
+        {"game_id": ["G2", "G2", "G1", "G1"], "person_id": [1, 2, 3, 4]},
+        schema={"game_id": pl.String, "person_id": pl.Int64},
+    )
+    report = key_coverage(
+        tied,
+        group_by=["game_id"],
+        value_columns=["person_id"],
+        name="c",
+        dataset="d",
+        unit="game",
+        measure="distinct players",
+    )
+    assert report.minimum == report.maximum == 2
+    assert report.minimum_key == ("G1",)
+    assert report.maximum_key == ("G1",)
+
+
+def test_coverage_format_names_the_unit_and_measure() -> None:
+    report = key_coverage(
+        _MATCHUPS,
+        group_by=["game_id"],
+        value_columns=["person_id", "matchups_person_id"],
+        name="c",
+        dataset="matchups_2023",
+        unit="game",
+        measure="distinct players",
+    )
+    text = report.format()
+    # Spelled out, rather than a bare "min / max" the reader has to decode.
+    assert "fewest distinct players in a game" in text
+    assert "most distinct players in a game" in text
+    assert "mean distinct players per game" in text
+    # The extreme groups are shown next to their counts.
+    assert "game G1" in text
+    assert "game G2" in text
 
 
 def test_key_coverage_empty_frame_is_all_missing() -> None:
@@ -219,6 +308,10 @@ def test_key_coverage_empty_frame_is_all_missing() -> None:
     assert report.missing_units == 3
     assert (report.minimum, report.maximum) == (0, 0)
     assert report.mean == 0.0
+    # No groups, so no extremes to name — and format() must still render.
+    assert report.minimum_key is None
+    assert report.maximum_key is None
+    assert "fewest distinct players in a game" in report.format()
 
 
 # --- named reports ----------------------------------------------------------
@@ -237,6 +330,7 @@ def test_matchups_game_coverage_report(seeded_profile) -> None:
     assert report.dataset == "matchups_2023"
     assert (report.units, report.reference_units, report.missing_units) == (2, 3, 1)
     assert report.missing_sample == (("G3",),)
+    assert (report.minimum_key, report.maximum_key) == (("G2",), ("G1",))
 
 
 def test_datanba_game_coverage_report(seeded_profile) -> None:

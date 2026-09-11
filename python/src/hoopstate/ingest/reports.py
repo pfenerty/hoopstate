@@ -63,6 +63,45 @@ __all__ = [
 _SAMPLE = 10
 
 
+def _format_key(key: tuple[object, ...]) -> str:
+    """Render one group/join key. Composite keys join on ``/``."""
+    return "/".join(str(part) for part in key)
+
+
+def _sample_line(label: str, sample: tuple[tuple[object, ...], ...], total: int) -> list[str]:
+    """Render a bounded evidence list as a footer line, or nothing if empty."""
+    if not sample:
+        return []
+    shown = ", ".join(_format_key(key) for key in sample)
+    scope = f"first {len(sample)} of {total:,}" if len(sample) < total else f"{total:,}"
+    return [f"  {label} ({scope}): {shown}"]
+
+
+def _table(rows: Sequence[tuple[str, str, str]]) -> list[str]:
+    """Render ``(metric, value, detail)`` rows as an aligned table.
+
+    Values are right-aligned so magnitudes line up and an outlier is visible at
+    a glance. The detail column is dropped entirely when no row uses it.
+    """
+    has_detail = any(detail for _, _, detail in rows)
+    headers = ("metric", "value", "detail") if has_detail else ("metric", "value")
+    width = [
+        max(len(headers[i]), max((len(row[i]) for row in rows), default=0))
+        for i in range(len(headers))
+    ]
+    lines = [
+        f"  {headers[0]:<{width[0]}}  {headers[1]:>{width[1]}}"
+        + (f"  {headers[2]}" if has_detail else ""),
+        "  " + "  ".join("-" * w for w in width),
+    ]
+    for metric, value, detail in rows:
+        line = f"  {metric:<{width[0]}}  {value:>{width[1]}}"
+        if has_detail:
+            line += f"  {detail}"
+        lines.append(line.rstrip())
+    return lines
+
+
 @dataclass(frozen=True)
 class JoinReport:
     """How well ``left``'s key resolves against ``right``'s.
@@ -92,18 +131,34 @@ class JoinReport:
         return self.matched / self.left_rows
 
     def format(self) -> str:
-        key = ", ".join(self.left_key)
-        right_key = ", ".join(self.right_key)
-        lines = [
-            f"{self.name}: {self.left} ({key}) -> {self.right} ({right_key})",
-            f"  left rows          {self.left_rows}",
-            f"  matched            {self.matched} ({self.match_rate:.6%})",
-            f"  unmatched          {self.unmatched}",
-            f"  duplicate rhs keys {self.duplicate_right_keys}",
+        rows = [
+            (f"rows in {self.left}", f"{self.left_rows:,}", ""),
+            (f"rows matched into {self.right}", f"{self.matched:,}", f"{self.match_rate:.6%}"),
+            ("rows matching nothing", f"{self.unmatched:,}", ""),
+            (
+                f"duplicate keys in {self.right}",
+                f"{self.duplicate_right_keys:,}",
+                "each one fans rows out downstream" if self.duplicate_right_keys else "",
+            ),
         ]
-        if self.unmatched_sample:
-            lines.append(f"  unmatched sample   {list(self.unmatched_sample)}")
-        return "\n".join(lines)
+        return "\n".join(
+            [
+                f"{self.name} — {self.left} -> {self.right}",
+                f"joined on ({', '.join(self.left_key)}) -> ({', '.join(self.right_key)})",
+                "",
+                *_table(rows),
+                *(
+                    [
+                        "",
+                        *_sample_line(
+                            "keys matching nothing", self.unmatched_sample, self.unmatched
+                        ),
+                    ]
+                    if self.unmatched_sample
+                    else []
+                ),
+            ]
+        )
 
 
 def join_report(
@@ -143,7 +198,10 @@ def join_report(
         matched=left.height - unmatched,
         unmatched=unmatched,
         duplicate_right_keys=duplicates,
-        unmatched_sample=tuple(unmatched_frame.select(left_on).unique().head(sample).rows()),
+        # Sorted so re-running against unchanged data yields an identical report.
+        unmatched_sample=tuple(
+            unmatched_frame.select(left_on).unique().sort(list(left_on)).head(sample).rows()
+        ),
     )
 
 
@@ -154,6 +212,12 @@ class CoverageReport:
     ``units`` counts groups the dataset actually has rows for; ``missing_units``
     counts reference keys it has none for. The distribution describes distinct
     values of ``measure`` per group — for matchups, distinct player ids per game.
+
+    ``minimum_key`` and ``maximum_key`` name the groups at the extremes, so an
+    outlier is directly investigable rather than merely visible as a number.
+    Where several groups tie, the lexicographically first key is reported, which
+    keeps a re-run of the same data diffable against the previous one. Both are
+    ``None`` when the frame has no rows.
     """
 
     name: str
@@ -165,24 +229,53 @@ class CoverageReport:
     missing_units: int
     missing_sample: tuple[tuple[object, ...], ...]
     minimum: int
+    minimum_key: tuple[object, ...] | None
     median: float
     mean: float
     maximum: int
+    maximum_key: tuple[object, ...] | None
 
     def format(self) -> str:
-        lines = [f"{self.name}: {self.dataset}, {self.measure} per {self.unit}"]
-        if self.reference_units is None:
-            lines.append(f"  {self.unit}s              {self.units}")
-        else:
-            lines.append(f"  {self.unit}s              {self.units} of {self.reference_units}")
-            lines.append(f"  missing {self.unit}s      {self.missing_units}")
-        lines += [
-            f"  min / max          {self.minimum} / {self.maximum}",
-            f"  mean / median      {self.mean:.2f} / {self.median:.1f}",
+        def where(key: tuple[object, ...] | None) -> str:
+            return f"{self.unit} {_format_key(key)}" if key else ""
+
+        rows = [
+            (
+                f"{self.unit}s with data",
+                f"{self.units:,}",
+                "" if self.reference_units is None else f"of {self.reference_units:,} expected",
+            )
         ]
-        if self.missing_sample:
-            lines.append(f"  missing sample     {list(self.missing_sample)}")
-        return "\n".join(lines)
+        if self.reference_units is not None:
+            rows.append((f"{self.unit}s with no rows", f"{self.missing_units:,}", ""))
+        rows += [
+            (
+                f"fewest {self.measure} in a {self.unit}",
+                f"{self.minimum:,}",
+                where(self.minimum_key),
+            ),
+            (f"most {self.measure} in a {self.unit}", f"{self.maximum:,}", where(self.maximum_key)),
+            (f"mean {self.measure} per {self.unit}", f"{self.mean:,.2f}", ""),
+            (f"median {self.measure} per {self.unit}", f"{self.median:,.1f}", ""),
+        ]
+        return "\n".join(
+            [
+                f"{self.name} — {self.dataset}",
+                f"{self.measure} per {self.unit}",
+                "",
+                *_table(rows),
+                *(
+                    [
+                        "",
+                        *_sample_line(
+                            f"{self.unit}s with no rows", self.missing_sample, self.missing_units
+                        ),
+                    ]
+                    if self.missing_sample
+                    else []
+                ),
+            ]
+        )
 
 
 def key_coverage(
@@ -215,6 +308,16 @@ def key_coverage(
     per_group = pooled.group_by(group_by).agg(pl.col("__value").n_unique().alias("__distinct"))
     counts = per_group["__distinct"].to_list()
 
+    # Sorting by the group key first makes ties resolve the same way every run,
+    # so re-running a report against unchanged data produces an identical page.
+    minimum_key: tuple[object, ...] | None = None
+    maximum_key: tuple[object, ...] | None = None
+    if counts:
+        ordered = per_group.sort(list(group_by))
+        extremes = ordered["__distinct"]
+        minimum_key = ordered.filter(extremes == extremes.min()).select(group_by).rows()[0]
+        maximum_key = ordered.filter(extremes == extremes.max()).select(group_by).rows()[0]
+
     missing_units = 0
     missing_sample: tuple[tuple[object, ...], ...] = ()
     reference_units: int | None = None
@@ -225,7 +328,7 @@ def key_coverage(
             per_group.select(group_by), left_on=reference.columns, right_on=group_by, how="anti"
         )
         missing_units = missing.height
-        missing_sample = tuple(missing.head(sample).rows())
+        missing_sample = tuple(missing.sort(missing.columns).head(sample).rows())
 
     return CoverageReport(
         name=name,
@@ -237,9 +340,11 @@ def key_coverage(
         missing_units=missing_units,
         missing_sample=missing_sample,
         minimum=min(counts, default=0),
+        minimum_key=minimum_key,
         median=statistics.median(counts) if counts else 0.0,
         mean=statistics.fmean(counts) if counts else 0.0,
         maximum=max(counts, default=0),
+        maximum_key=maximum_key,
     )
 
 
