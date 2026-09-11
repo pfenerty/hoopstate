@@ -55,6 +55,7 @@ __all__ = [
     "ByteSource",
     "LoadResult",
     "ParsedName",
+    "bronze_parquet_path",
     "load_dataset",
     "parse_dataset_name",
     "parse_manifest",
@@ -265,7 +266,17 @@ def _archive_path(profile: StorageProfile, name: str) -> Path:
     return profile.zone(Zone.RAW) / f"{name}.tar.xz"
 
 
-def _parquet_path(profile: StorageProfile, name: str, parsed: ParsedName) -> Path:
+def bronze_parquet_path(profile: StorageProfile, name: str) -> Path:
+    """Resolve the bronze parquet path for a dataset.
+
+    The single source of truth for where a dataset's bronze table lands:
+    ``bronze/season=<year>/<name>.parquet``, season-partitioned via
+    :meth:`StorageProfile.zone`. The bulk loader writes the initial lossless
+    string capture here; the bronze conversion stage
+    (:mod:`hoopstate.ingest.bronze`) rewrites the same path with explicit types.
+    Both share this helper so the location is defined in exactly one place.
+    """
+    parsed = parse_dataset_name(name)
     bronze = profile.zone(Zone.BRONZE, season=parsed.season)
     return bronze / f"{name}.parquet"
 
@@ -297,10 +308,9 @@ def load_dataset(
         raise KeyError(f"dataset {name!r} is not in the manifest")
 
     url = manifest[name]
-    parsed = parse_dataset_name(name)
     archive_path = _archive_path(profile, name)
     sidecar = archive_path.with_name(archive_path.name + ".sha256")
-    parquet_path = _parquet_path(profile, name, parsed)
+    parquet_path = bronze_parquet_path(profile, name)
 
     if parquet_path.exists() and not force:
         sha = sidecar.read_text().strip() if sidecar.exists() else ""
