@@ -9,6 +9,9 @@ sync-state.json
 last-touched
 .exclusive-lock
 
+# Auto-import change-detection cache (size/mtime of issues.jsonl, per-machine)
+.auto-import-issues.jsonl
+
 # Daemon runtime (lock, log, pid)
 daemon.*
 
