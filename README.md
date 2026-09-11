@@ -26,6 +26,13 @@ tests/fixtures/      golden games as small committed parquet
 Parquet is the source of truth; DuckDB holds views plus materialized gold marts, so the database is
 always rebuildable and safe to delete. Data zones live outside git.
 
+Where those zones physically land is decided by a **storage profile** (`hoopstate.storage`), the one
+module that knows which profile is active — everything else asks for a zone path and gets one. The
+default `ephemeral` profile puts every zone under a single local scratch directory, so a fresh
+checkout runs with zero configuration; the `local` profile splits read-mostly bulk onto a NAS and
+keeps the working set (and always the DuckDB file) on fast local disk. Select with
+`HOOPSTATE_PROFILE`; override individual tiers with `HOOPSTATE_HOT` / `HOOPSTATE_COLD`.
+
 ## Getting started
 
 Only `uv` is required. If no system Python 3.14 is present, uv fetches a standalone one.
