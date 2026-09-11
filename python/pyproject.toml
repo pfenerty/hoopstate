@@ -1,0 +1,51 @@
+[project]
+name = "nbaviz"
+version = "0.1.0"
+description = "A richer model derived from public NBA play-by-play data"
+requires-python = ">=3.14"
+
+dependencies = [
+    # Ingestion, bulk transforms, sequence/feature derivation.
+    # polars is a pure-Python shim; the compiled Rust lives in polars-runtime-*,
+    # which ships cp310-abi3 wheels and is therefore forward-compatible with 3.14.
+    "polars>=1.44.2",
+    # Storage engine, SQL, joins, marts.
+    "duckdb>=1.5.5",
+    # Parquet interchange.
+    "pyarrow>=25.0.1",
+    "requests>=2.32",
+]
+
+[project.optional-dependencies]
+# The statistical layer. Deliberately separated: this is the part that stays in
+# Python permanently, even after the Rust port of the core model.
+stats = [
+    "pandas>=3.0",
+    "numpy>=2.5",
+    "scipy>=1.18",
+    "scikit-learn>=1.7",
+    "statsmodels>=0.15",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "ruff>=0.14",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nbaviz"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

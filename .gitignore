@@ -1,5 +1,31 @@
-
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
 .beads-credential-key
+
+# Flox runtime state
+.flox/cache/
+.flox/log/
+.flox/run/
+
+# Tokensave index
+.tokensave/
+
+# Data zones — parquet is the source of truth but lives outside git
+data/
+*.duckdb
+*.duckdb.wal
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Rust
+rust/target/
+
+# Repomix context dumps
+repomix-*.xml
