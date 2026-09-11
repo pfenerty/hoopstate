@@ -28,10 +28,18 @@ always rebuildable and safe to delete. Data zones live outside git.
 
 ## Getting started
 
+Only `uv` is required. If no system Python 3.14 is present, uv fetches a standalone one.
+
 ```bash
-flox activate
-cd python && uv sync --group dev && uv run pytest
+cd python
+UV_PYTHON_DOWNLOADS=automatic uv sync --group dev
+uv run pytest -q
+uv run ruff check . && uv run ruff format --check .
 ```
+
+flox is optional and purely a local convenience — `flox activate` gives you the same
+environment, but nothing in the build depends on it. CI and cloud sessions use the
+commands above verbatim.
 
 ## Planning
 

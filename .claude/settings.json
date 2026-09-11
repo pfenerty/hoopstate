@@ -17,6 +17,10 @@
           {
             "command": "bd prime",
             "type": "command"
+          },
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}/python\" && UV_PYTHON_DOWNLOADS=automatic uv sync --group dev >/dev/null 2>&1 || true"
           }
         ],
         "matcher": ""

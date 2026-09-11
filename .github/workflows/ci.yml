@@ -1,0 +1,48 @@
+name: CI
+
+# Working from mobile means no terminal to run tests in. CI is the feedback
+# loop: every push and PR reports back where you can see it on a phone, and
+# it is what Claude Code's auto-fix reacts to on a pull request.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+
+      # No system 3.14 on the runner; uv fetches a standalone build, which is
+      # the same path a cloud session takes.
+      - name: Install Python 3.14
+        run: uv python install 3.14
+
+      - name: Sync dependencies
+        run: uv sync --group dev --frozen
+
+      # Kept as separate steps rather than `make check` so a failure names
+      # itself in the GitHub mobile UI without opening the log.
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest -q
