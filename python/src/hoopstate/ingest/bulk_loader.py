@@ -52,15 +52,19 @@ from hoopstate.storage import StorageProfile, Zone, resolve_profile
 
 __all__ = [
     "MANIFEST_URL",
+    "ArchiveRef",
     "ByteSource",
     "LoadResult",
     "ParsedName",
+    "ensure_archive",
+    "extract_single_csv",
     "load_dataset",
     "parse_dataset_name",
     "parse_manifest",
     "read_manifest",
     "requests_byte_source",
     "stream_archive_to_parquet",
+    "stream_archive_to_typed_parquet",
 ]
 
 # The canonical manifest. Served from raw.githubusercontent.com, which the
@@ -179,6 +183,20 @@ def read_manifest(byte_source: ByteSource, *, url: str | None = None) -> dict[st
 
 
 @dataclass(frozen=True)
+class ArchiveRef:
+    """A raw archive that is present and verified on disk.
+
+    Returned by :func:`ensure_archive`. ``sha256`` is the checksum recorded in
+    the sidecar next to ``archive_path`` and proves the cached bytes are intact.
+    """
+
+    name: str
+    url: str
+    archive_path: Path
+    sha256: str
+
+
+@dataclass(frozen=True)
 class LoadResult:
     """The outcome of loading one dataset.
 
@@ -227,14 +245,14 @@ def _download(byte_source: ByteSource, url: str, dest: Path) -> str:
     return digest.hexdigest()
 
 
-def stream_archive_to_parquet(archive_path: Path, parquet_path: Path) -> int:
-    """Decompress the single CSV inside ``archive_path`` straight to parquet.
+def extract_single_csv(archive_path: Path) -> bytes:
+    """Decompress and return the bytes of the single CSV inside ``archive_path``.
 
-    The extracted CSV is never written to disk: it is decompressed in memory and
-    handed to polars, which writes parquet via a temporary file that is only
-    renamed into place once the write completes. Every column is read as a
-    string — a lossless 1:1 capture of the source, leaving typing to the
-    bronze-conversion stage. Returns the row count written.
+    The archives in this collection each hold exactly one CSV; anything else is a
+    corrupt or unexpected archive and raises. The CSV is never spilled to disk —
+    it is decompressed straight into memory, since the development machine's boot
+    disk cannot afford the ~300 MB transient an extracted play-by-play CSV would
+    cost. Callers hand the bytes to polars.
     """
     with tarfile.open(archive_path, mode="r:xz") as tar:
         members = [m for m in tar.getmembers() if m.isfile() and m.name.endswith(".csv")]
@@ -246,10 +264,16 @@ def stream_archive_to_parquet(archive_path: Path, parquet_path: Path) -> int:
         extracted = tar.extractfile(members[0])
         if extracted is None:  # pragma: no cover - isfile() already guarantees this
             raise ValueError(f"could not extract {members[0].name} from {archive_path.name}")
-        data = extracted.read()
+        return extracted.read()
 
-    frame = pl.read_csv(io.BytesIO(data), infer_schema_length=0)
 
+def _write_parquet_atomic(frame: pl.DataFrame, parquet_path: Path) -> None:
+    """Write ``frame`` to ``parquet_path`` via a temp file renamed on success.
+
+    A partial or failed write never leaves a usable-looking parquet behind: the
+    write lands on a sibling ``.tmp`` and is only renamed into place once it
+    completes, and the ``.tmp`` is removed on any failure.
+    """
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = parquet_path.with_name(parquet_path.name + ".tmp")
     try:
@@ -258,7 +282,56 @@ def stream_archive_to_parquet(archive_path: Path, parquet_path: Path) -> int:
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def stream_archive_to_parquet(archive_path: Path, parquet_path: Path) -> int:
+    """Decompress the single CSV inside ``archive_path`` straight to parquet.
+
+    Every column is read as a string — a lossless 1:1 capture of the source,
+    leaving per-source typing to the bronze-conversion stage
+    (:mod:`hoopstate.ingest.bronze`). Returns the row count written.
+    """
+    frame = pl.read_csv(io.BytesIO(extract_single_csv(archive_path)), infer_schema_length=0)
+    _write_parquet_atomic(frame, parquet_path)
     return frame.height
+
+
+def stream_archive_to_typed_parquet(
+    archive_path: Path,
+    parquet_path: Path,
+    schema: dict[str, pl.DataType],
+) -> int:
+    """Decompress the single CSV inside ``archive_path`` to *typed* parquet.
+
+    The CSV is read losslessly as strings, then every column is cast to the
+    explicit dtype declared in ``schema`` — no dtype is ever inferred from the
+    data. This is the primitive the bronze conversion is built on
+    (:mod:`hoopstate.ingest.bronze`), where the per-source schemas live.
+
+    ``schema`` must name exactly the CSV's columns: an unexpected or missing
+    column is schema drift in the upstream source and raises rather than being
+    silently dropped or nulled. The output columns are ordered to match
+    ``schema``. Casts are strict, so a value that does not fit its declared type
+    fails loudly instead of becoming null. Because every row is cast and kept,
+    the row count written equals the source CSV's. Returns that row count.
+    """
+    frame = pl.read_csv(io.BytesIO(extract_single_csv(archive_path)), infer_schema_length=0)
+
+    expected = set(schema)
+    actual = set(frame.columns)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unexpected = sorted(actual - expected)
+        raise ValueError(
+            f"{archive_path.name} columns do not match the declared schema; "
+            f"missing={missing} unexpected={unexpected}"
+        )
+
+    typed = frame.select(
+        [pl.col(column).cast(dtype, strict=True) for column, dtype in schema.items()]
+    )
+    _write_parquet_atomic(typed, parquet_path)
+    return typed.height
 
 
 def _archive_path(profile: StorageProfile, name: str) -> Path:
@@ -270,6 +343,51 @@ def _parquet_path(profile: StorageProfile, name: str, parsed: ParsedName) -> Pat
     return bronze / f"{name}.parquet"
 
 
+def ensure_archive(
+    name: str,
+    *,
+    byte_source: ByteSource,
+    profile: StorageProfile | None = None,
+    manifest: dict[str, str] | None = None,
+    force: bool = False,
+) -> ArchiveRef:
+    """Ensure the raw archive for ``name`` is present and verified on disk.
+
+    Reuses a cached archive when its sidecar checksum still matches the bytes on
+    disk; otherwise (or when ``force`` is set) it downloads afresh and records a
+    new checksum sidecar. The checksum both proves the cached bytes are intact
+    and is what lets a completed dataset skip the fetch entirely.
+
+    This is the download/cache half of :func:`load_dataset`, factored out so the
+    bronze conversion can obtain the raw archive without also producing the
+    loader's lossless string-parquet capture.
+    """
+    if profile is None:
+        profile = resolve_profile()
+    if manifest is None:
+        manifest = read_manifest(byte_source)
+    if name not in manifest:
+        raise KeyError(f"dataset {name!r} is not in the manifest")
+
+    url = manifest[name]
+    archive_path = _archive_path(profile, name)
+    sidecar = archive_path.with_name(archive_path.name + ".sha256")
+
+    have_valid_cache = (
+        not force
+        and archive_path.exists()
+        and sidecar.exists()
+        and sidecar.read_text().strip() == _sha256_of(archive_path)
+    )
+    if have_valid_cache:
+        sha = sidecar.read_text().strip()
+    else:
+        sha = _download(byte_source, url, archive_path)
+        sidecar.write_text(sha + "\n")
+
+    return ArchiveRef(name=name, url=url, archive_path=archive_path, sha256=sha)
+
+
 def load_dataset(
     name: str,
     *,
@@ -278,7 +396,7 @@ def load_dataset(
     manifest: dict[str, str] | None = None,
     force: bool = False,
 ) -> LoadResult:
-    """Download, cache, and convert one named dataset to parquet.
+    """Download, cache, and convert one named dataset to lossless string parquet.
 
     ``manifest`` may be supplied to avoid a second network round-trip when
     loading many datasets; otherwise it is fetched through ``byte_source``.
@@ -314,28 +432,16 @@ def load_dataset(
             rows=None,
         )
 
-    # Reuse a cached archive when its sidecar checksum still matches; otherwise
-    # (re)download. The checksum both proves the cached bytes are intact and is
-    # what lets a completed dataset skip the fetch entirely.
-    have_valid_cache = (
-        not force
-        and archive_path.exists()
-        and sidecar.exists()
-        and sidecar.read_text().strip() == _sha256_of(archive_path)
+    ref = ensure_archive(
+        name, byte_source=byte_source, profile=profile, manifest=manifest, force=force
     )
-    if have_valid_cache:
-        sha = sidecar.read_text().strip()
-    else:
-        sha = _download(byte_source, url, archive_path)
-        sidecar.write_text(sha + "\n")
-
-    rows = stream_archive_to_parquet(archive_path, parquet_path)
+    rows = stream_archive_to_parquet(ref.archive_path, parquet_path)
     return LoadResult(
         name=name,
         url=url,
-        archive_path=archive_path,
+        archive_path=ref.archive_path,
         parquet_path=parquet_path,
-        sha256=sha,
+        sha256=ref.sha256,
         skipped=False,
         rows=rows,
     )
