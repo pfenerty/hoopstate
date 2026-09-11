@@ -346,3 +346,35 @@ def test_manifest_is_fetched_when_not_passed(ephemeral_profile, monkeypatch) -> 
     monkeypatch.setattr(bulk_loader, "MANIFEST_URL", MANIFEST_FIXTURE_URL)
     result = bulk_loader.load_dataset(name, byte_source=source, profile=ephemeral_profile)
     assert result.rows == 2
+
+
+def test_ensure_archive_defaults_to_the_raw_zone(ephemeral_profile) -> None:
+    name, byte_map, manifest = _one_dataset()
+    ref = bulk_loader.ensure_archive(
+        name, byte_source=_byte_source_from(byte_map), profile=ephemeral_profile, manifest=manifest
+    )
+    assert ref.archive_path == ephemeral_profile.zone(Zone.RAW) / f"{name}.tar.xz"
+    assert ref.archive_path.exists()
+
+
+def test_ensure_archive_honours_an_explicit_directory(ephemeral_profile, tmp_path: Path) -> None:
+    """A caller that owns a zone can keep its archive there instead of in raw.
+
+    The quarantined oracle is the caller that needs this
+    (:mod:`hoopstate.validate.oracle`); this function stays incurious about why.
+    """
+    name, byte_map, manifest = _one_dataset()
+    elsewhere = tmp_path / "elsewhere"
+    ref = bulk_loader.ensure_archive(
+        name,
+        byte_source=_byte_source_from(byte_map),
+        profile=ephemeral_profile,
+        manifest=manifest,
+        archive_dir=elsewhere,
+    )
+    assert ref.archive_path == elsewhere / f"{name}.tar.xz"
+    assert ref.archive_path.exists()
+    # The checksum sidecar follows the archive, so the cache stays self-contained.
+    assert (elsewhere / f"{name}.tar.xz.sha256").exists()
+    # And nothing leaked into the shared raw zone.
+    assert list(ephemeral_profile.zone(Zone.RAW).glob("*.tar.xz")) == []
