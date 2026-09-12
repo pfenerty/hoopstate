@@ -20,6 +20,7 @@ versioned analysis marts.
 python/src/hoopstate/   ingest/ model/ derive/ validate/ db/
 rust/                added at port time — see rust/README.md
 docs/research/       findings from the research spikes
+docs/disk-budget.md  the local footprint budget, checked by `python -m hoopstate.footprint`
 tests/fixtures/      golden games as small committed parquet
 ```
 

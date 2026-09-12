@@ -197,6 +197,11 @@ uv run pytest -q
 uv run ruff check . && uv run ruff format --check .
 ```
 
+`python -m hoopstate.footprint` checks local disk usage against
+[`docs/disk-budget.md`](docs/disk-budget.md) and exits 1 when the budget does not fit. It is
+deliberately **not** in `make check`: it reports a property of a machine, not of the code, and a
+cloud session has nothing to budget. Run it before starting E10.
+
 **flox is a convenience, not a requirement.** `flox activate --` works locally, but
 every command above runs without it: `uv` sources a standalone CPython 3.14 from
 python-build-standalone when no system 3.14 is present. This is verified in CI and is
