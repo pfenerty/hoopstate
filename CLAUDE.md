@@ -104,4 +104,25 @@ does not support database files on network filesystems.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+### DuckDB is disposable; parquet is the source of truth
+
+The DuckDB file (`hoopstate.duckdb`, always on local disk) holds nothing that
+isn't regenerable from parquet: **views** over the zones plus **materialized**
+gold marts. Delete it any time — `make rebuild-db` (or `python -m
+hoopstate.db.rebuild`) reconstructs an identical database from the same parquet.
+
+Relations are named `<zone>_<table>` so the zone is legible in every query:
+
+- **bronze** — one *view* per source, unioned across seasons/playoffs
+  (`bronze_nbastats`, `bronze_datanba`, …). Season and the regular/playoff split
+  live only in the file name, so the view adds `season` (INTEGER) and `playoffs`
+  (BOOLEAN) columns the parquet lacks.
+- **silver** — one *view* per parquet file (`silver_possession`, …), read live.
+- **gold** — one *materialized table* per parquet file (`gold_<mart>`); gold is
+  the served API contract, so it is decoupled from the parquet layout.
+- **raw / cache / oracle** are never surfaced: the first two are archives, and
+  oracle is quarantined from the core-model database.
+
+In-database gold marts (derived in SQL rather than published as parquet) are
+registered with `rebuild_database(gold_marts=...)`. See
+`hoopstate/db/rebuild.py` for the full convention.
