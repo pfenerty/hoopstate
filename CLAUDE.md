@@ -231,7 +231,11 @@ tests on Ubuntu against a standalone 3.14.
 ## Architecture Overview
 
 Parquet is the source of truth; DuckDB holds views plus materialized gold marts and is
-always rebuildable and safe to delete. Zones: `bronze/` (typed, 1:1 with source),
+always rebuildable and safe to delete — `python -m hoopstate.db.catalog` rebuilds it from
+scratch, and `hoopstate.db.catalog` is the only module that writes SQL DDL. The catalog
+convention is a schema per zone and a view per dataset (`bronze.nbastats`,
+`silver.canonical_event`), with bronze views globbing across seasons and restoring
+`season` as a column. Zones: `bronze/` (typed, 1:1 with source),
 `silver/` (canonical_event, lineup_stint, possession, possession_chance), `gold/`
 (versioned analysis marts — the future API contract), and `oracle/` (pbpstats
 reference, **quarantined**: the test suite may read it, the core model never).

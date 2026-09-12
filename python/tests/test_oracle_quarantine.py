@@ -34,9 +34,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import duckdb
+import polars as pl
 import pytest
 
+from hoopstate.db.catalog import rebuild
 from hoopstate.ingest.bronze import schema_for_source
+from hoopstate.storage import Profile, StorageProfile, Zone
 
 # python/tests/ -> python/ -> python/src/hoopstate/
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "hoopstate"
@@ -211,3 +215,50 @@ def test_bronze_has_no_schema_for_pbpstats() -> None:
     """
     with pytest.raises(KeyError):
         schema_for_source("pbpstats")
+
+
+def test_the_rebuilt_catalog_has_no_view_over_the_oracle(tmp_path: Path) -> None:
+    """A third barrier, this one over the DuckDB catalog (``hoops-1lg.1.4``).
+
+    The static guard above stops a module from *naming* the oracle. This checks
+    the other end: that the catalog a rebuild actually produces cannot hand the
+    answer key to a derivation module as a queryable view — which would put it
+    one ``JOIN`` away from the code it is supposed to grade, with no Python
+    import to notice.
+
+    The oracle parquet is planted here on purpose. A catalog that published
+    whatever it found on disk would pass this test only by luck.
+    """
+    profile = StorageProfile(name=Profile.EPHEMERAL, root=tmp_path)
+
+    oracle_zone = profile.zone(Zone.ORACLE)
+    oracle_zone.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame({"STARTTYPE": ["Off Steal"]}).write_parquet(oracle_zone / "pbpstats_2023.parquet")
+
+    bronze = profile.zone(Zone.BRONZE, season=2023)
+    bronze.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame({"GAME_ID": ["22300001"]}).write_parquet(bronze / "nbastats_2023.parquet")
+
+    result = rebuild(profile)
+    assert result.created, "the bronze fixture must produce at least one view to compare against"
+
+    connection = duckdb.connect(str(result.database), read_only=True)
+    try:
+        schemas = {
+            row[0]
+            for row in connection.execute("SELECT schema_name FROM duckdb_schemas()").fetchall()
+        }
+        views = connection.execute(
+            "SELECT schema_name, view_name, sql FROM duckdb_views() WHERE NOT internal"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert Zone.ORACLE.value not in schemas
+    for schema, view, sql in views:
+        assert Zone.ORACLE.value not in schema
+        assert Zone.ORACLE.value not in view
+        # The view's SQL carries the parquet path, so this also catches a view
+        # in another schema reading out of the quarantined directory.
+        assert Zone.ORACLE.value not in sql.lower()
+        assert _FORBIDDEN_SUBSTRING not in sql.lower()

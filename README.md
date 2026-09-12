@@ -26,6 +26,18 @@ tests/fixtures/      golden games as small committed parquet
 Parquet is the source of truth; DuckDB holds views plus materialized gold marts, so the database is
 always rebuildable and safe to delete. Data zones live outside git.
 
+The catalog follows one convention: **a DuckDB schema per zone, a view per dataset**, so
+`bronze/season=2023/nbastats_2023.parquet` is queried as `SELECT * FROM bronze.nbastats WHERE season
+= 2023`, and silver and gold tables as `silver.canonical_event`, `gold.<mart>`. Bronze views glob
+across seasons and restore the partition key as a `season` column, so a newly ingested season needs
+no rebuild. One command builds the database, and `--list` shows what it would create without
+touching it:
+
+```
+python -m hoopstate.db.catalog          # rebuild from parquet
+python -m hoopstate.db.catalog --list   # show the planned views
+```
+
 Where those zones physically land is decided by a **storage profile** (`hoopstate.storage`), the one
 module that knows which profile is active — everything else asks for a zone path and gets one. The
 default `ephemeral` profile puts every zone under a single local scratch directory, so a fresh
