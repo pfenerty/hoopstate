@@ -219,11 +219,11 @@ are all permitted, which covers dependency installs and the entire
 `shufinskiy/nba_data` archive. Do not add a data source on another domain without
 checking it against the allowlist first.
 
-**Cloud sessions use the `ephemeral` storage profile** — one scratch directory, no NAS,
-no hot/cold split, data re-fetched per session. 30 GB is ample for a season end to end.
-Issues labelled `local-only` (NAS preflight, toolchain relocation) cannot be worked
-from a cloud session, and are deliberately kept off the critical path: no
-cloud-reachable work is ever gated on them.
+**Cloud sessions use the `ephemeral` storage profile** — a scratch directory that is
+re-fetched per session rather than persisted. 30 GB is ample for a season end to end.
+Issues labelled `local-only` cannot be worked from a cloud session, and are
+deliberately kept off the critical path: no cloud-reachable work is ever gated on
+them.
 
 CI is the feedback loop when there is no terminal. Every push runs lint, format and
 tests on Ubuntu against a standalone 3.14.
@@ -237,8 +237,9 @@ always rebuildable and safe to delete. Zones: `bronze/` (typed, 1:1 with source)
 reference, **quarantined**: the test suite may read it, the core model never).
 
 All zone paths resolve through a storage profile; nothing downstream knows which
-profile is active. The DuckDB file stays on local disk under every profile — DuckDB
-does not support database files on network filesystems.
+profile is active. A profile is one root — `HOOPSTATE_ROOT` overrides it, and must point
+at local disk, since the DuckDB file lives under that root and DuckDB does not support
+database files on network filesystems.
 
 ## Conventions & Patterns
 

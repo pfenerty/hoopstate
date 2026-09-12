@@ -39,7 +39,7 @@ from hoopstate.ingest.bronze import (
     convert_dataset,
     schema_for_source,
 )
-from hoopstate.storage import ENV_COLD, ENV_HOT, ENV_PROFILE, Zone, resolve_profile
+from hoopstate.storage import ENV_PROFILE, ENV_ROOT, Zone, resolve_profile
 
 # --- fixtures ---------------------------------------------------------------
 
@@ -227,9 +227,7 @@ DATANBA_ROWS = [
 
 @pytest.fixture
 def ephemeral_profile(tmp_path: Path):
-    return resolve_profile(
-        env={ENV_PROFILE: "ephemeral", ENV_HOT: str(tmp_path), ENV_COLD: str(tmp_path)}
-    )
+    return resolve_profile(env={ENV_PROFILE: "ephemeral", ENV_ROOT: str(tmp_path)})
 
 
 def _dataset(name: str, columns: list[str], rows: list[list[str]]):

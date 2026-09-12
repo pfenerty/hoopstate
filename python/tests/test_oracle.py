@@ -32,7 +32,7 @@ import polars as pl
 import pytest
 
 from hoopstate.ingest import bulk_loader
-from hoopstate.storage import ENV_COLD, ENV_HOT, ENV_PROFILE, Zone, resolve_profile
+from hoopstate.storage import ENV_PROFILE, ENV_ROOT, Zone, resolve_profile
 from hoopstate.validate.oracle import (
     DEFAULT_ORACLE_DATASET,
     ORACLE_SCHEMA,
@@ -106,9 +106,7 @@ _MANIFEST = {DEFAULT_ORACLE_DATASET: _URL}
 
 @pytest.fixture
 def ephemeral_profile(tmp_path: Path):
-    return resolve_profile(
-        env={ENV_PROFILE: "ephemeral", ENV_HOT: str(tmp_path), ENV_COLD: str(tmp_path)}
-    )
+    return resolve_profile(env={ENV_PROFILE: "ephemeral", ENV_ROOT: str(tmp_path)})
 
 
 def _ingest(profile, *, csv: str = _CSV, **kwargs):
@@ -195,20 +193,9 @@ def test_nothing_lands_in_the_shared_raw_zone(ephemeral_profile) -> None:
     assert archive.is_relative_to(oracle_root)
 
     raw = ephemeral_profile.zone(Zone.RAW)
-    # Under the ephemeral profile every zone shares one root, so an existence
-    # check on the directory would be meaningless; look for the files instead.
+    # Every zone shares one root, so an existence check on the directory would be
+    # meaningless; look for the files instead.
     assert list(raw.glob("pbpstats*")) == []
-
-
-def test_oracle_tree_is_hot_under_the_local_profile(tmp_path: Path) -> None:
-    """The answer key is read constantly during validation; it belongs on fast disk."""
-    hot = tmp_path / "hot"
-    cold = tmp_path / "cold"
-    profile = resolve_profile(env={ENV_PROFILE: "local", ENV_HOT: str(hot), ENV_COLD: str(cold)})
-    result = _ingest(profile)
-    assert result.parquet_path.is_relative_to(hot)
-    assert oracle_archive_dir(profile).is_relative_to(hot)
-    assert not list(cold.rglob("pbpstats*"))
 
 
 # --- refusals ---------------------------------------------------------------

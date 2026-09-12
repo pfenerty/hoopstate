@@ -34,7 +34,7 @@ from hoopstate.ingest.bulk_loader import (
     rewrite_github_raw_url,
     stream_archive_to_parquet,
 )
-from hoopstate.storage import ENV_COLD, ENV_HOT, ENV_PROFILE, Zone, resolve_profile
+from hoopstate.storage import ENV_PROFILE, ENV_ROOT, Zone, resolve_profile
 
 # --- fixtures ---------------------------------------------------------------
 
@@ -72,9 +72,7 @@ def ephemeral_profile(tmp_path: Path):
     # Override BOTH roots so the ephemeral hot==cold collapse holds under an
     # isolated per-test directory; overriding only hot would leave cold pointing
     # at the shared scratch root and leak archives between tests.
-    return resolve_profile(
-        env={ENV_PROFILE: "ephemeral", ENV_HOT: str(tmp_path), ENV_COLD: str(tmp_path)}
-    )
+    return resolve_profile(env={ENV_PROFILE: "ephemeral", ENV_ROOT: str(tmp_path)})
 
 
 # --- pure helpers -----------------------------------------------------------
@@ -223,7 +221,7 @@ def test_no_intermediate_csv_on_disk(ephemeral_profile) -> None:
     source = _byte_source_from(byte_map)
     bulk_loader.load_dataset(name, byte_source=source, profile=ephemeral_profile, manifest=manifest)
     # Nothing with a .csv suffix is ever written anywhere under the profile root.
-    stray = list(ephemeral_profile.hot_root.rglob("*.csv"))
+    stray = list(ephemeral_profile.root.rglob("*.csv"))
     assert stray == []
 
 
