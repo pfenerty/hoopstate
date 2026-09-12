@@ -3,7 +3,7 @@ export UV_PYTHON_DOWNLOADS := automatic
 
 PY := cd python && uv run
 
-.PHONY: check sync lint fmt test
+.PHONY: check sync lint fmt test rebuild-db
 
 check: lint test          ## lint + tests, the one command CI and humans both run
 
@@ -20,3 +20,6 @@ fmt:
 
 test:
 	$(PY) pytest -q
+
+rebuild-db:               ## delete and rebuild the DuckDB file from parquet
+	$(PY) python -m hoopstate.db.rebuild
