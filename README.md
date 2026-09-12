@@ -20,18 +20,32 @@ versioned analysis marts.
 python/src/hoopstate/   ingest/ model/ derive/ validate/ db/
 rust/                added at port time — see rust/README.md
 docs/research/       findings from the research spikes
+docs/disk-budget.md  the local footprint budget, checked by `python -m hoopstate.footprint`
 tests/fixtures/      golden games as small committed parquet
 ```
 
 Parquet is the source of truth; DuckDB holds views plus materialized gold marts, so the database is
 always rebuildable and safe to delete. Data zones live outside git.
 
+The catalog follows one convention: **a DuckDB schema per zone, a view per dataset**, so
+`bronze/season=2023/nbastats_2023.parquet` is queried as `SELECT * FROM bronze.nbastats WHERE season
+= 2023`, and silver and gold tables as `silver.canonical_event`, `gold.<mart>`. Bronze views glob
+across seasons and restore the partition key as a `season` column, so a newly ingested season needs
+no rebuild. One command builds the database, and `--list` shows what it would create without
+touching it:
+
+```
+python -m hoopstate.db.catalog          # rebuild from parquet
+python -m hoopstate.db.catalog --list   # show the planned views
+```
+
 Where those zones physically land is decided by a **storage profile** (`hoopstate.storage`), the one
 module that knows which profile is active — everything else asks for a zone path and gets one. The
 default `ephemeral` profile puts every zone under a single local scratch directory, so a fresh
-checkout runs with zero configuration; the `local` profile splits read-mostly bulk onto a NAS and
-keeps the working set (and always the DuckDB file) on fast local disk. Select with
-`HOOPSTATE_PROFILE`; override individual tiers with `HOOPSTATE_HOT` / `HOOPSTATE_COLD`.
+checkout runs with zero configuration; the `local` profile puts them under
+`~/hoopstate/data`, where they survive between sessions. Select with `HOOPSTATE_PROFILE`;
+override the root with `HOOPSTATE_ROOT`. That root must be on local disk — DuckDB does not
+support database files on network filesystems.
 
 ## Getting started
 

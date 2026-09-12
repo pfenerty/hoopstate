@@ -33,16 +33,14 @@ from hoopstate.ingest.reports import (
     main,
     run_report,
 )
-from hoopstate.storage import ENV_COLD, ENV_HOT, ENV_PROFILE, resolve_profile
+from hoopstate.storage import ENV_PROFILE, ENV_ROOT, resolve_profile
 
 # --- fixtures ---------------------------------------------------------------
 
 
 @pytest.fixture
 def ephemeral_profile(tmp_path: Path):
-    return resolve_profile(
-        env={ENV_PROFILE: "ephemeral", ENV_HOT: str(tmp_path), ENV_COLD: str(tmp_path)}
-    )
+    return resolve_profile(env={ENV_PROFILE: "ephemeral", ENV_ROOT: str(tmp_path)})
 
 
 def _write_bronze(profile, name: str, frame: pl.DataFrame) -> Path:
@@ -366,8 +364,7 @@ def test_cli_list(capsys) -> None:
 
 def test_cli_all_runs_every_report(seeded_profile, monkeypatch, capsys) -> None:
     monkeypatch.setenv(ENV_PROFILE, "ephemeral")
-    monkeypatch.setenv(ENV_HOT, str(seeded_profile.hot_root))
-    monkeypatch.setenv(ENV_COLD, str(seeded_profile.cold_root))
+    monkeypatch.setenv(ENV_ROOT, str(seeded_profile.root))
     assert main(["--all", "--season", "2023"]) == 0
     out = capsys.readouterr().out
     for name in REPORTS:

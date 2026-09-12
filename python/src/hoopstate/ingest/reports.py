@@ -45,6 +45,7 @@ from pathlib import Path
 
 import polars as pl
 
+from hoopstate._format import table
 from hoopstate.ingest.bronze import bronze_parquet_path
 from hoopstate.storage import StorageProfile, resolve_profile
 
@@ -75,31 +76,6 @@ def _sample_line(label: str, sample: tuple[tuple[object, ...], ...], total: int)
     shown = ", ".join(_format_key(key) for key in sample)
     scope = f"first {len(sample)} of {total:,}" if len(sample) < total else f"{total:,}"
     return [f"  {label} ({scope}): {shown}"]
-
-
-def _table(rows: Sequence[tuple[str, str, str]]) -> list[str]:
-    """Render ``(metric, value, detail)`` rows as an aligned table.
-
-    Values are right-aligned so magnitudes line up and an outlier is visible at
-    a glance. The detail column is dropped entirely when no row uses it.
-    """
-    has_detail = any(detail for _, _, detail in rows)
-    headers = ("metric", "value", "detail") if has_detail else ("metric", "value")
-    width = [
-        max(len(headers[i]), max((len(row[i]) for row in rows), default=0))
-        for i in range(len(headers))
-    ]
-    lines = [
-        f"  {headers[0]:<{width[0]}}  {headers[1]:>{width[1]}}"
-        + (f"  {headers[2]}" if has_detail else ""),
-        "  " + "  ".join("-" * w for w in width),
-    ]
-    for metric, value, detail in rows:
-        line = f"  {metric:<{width[0]}}  {value:>{width[1]}}"
-        if has_detail:
-            line += f"  {detail}"
-        lines.append(line.rstrip())
-    return lines
 
 
 @dataclass(frozen=True)
@@ -146,7 +122,7 @@ class JoinReport:
                 f"{self.name} — {self.left} -> {self.right}",
                 f"joined on ({', '.join(self.left_key)}) -> ({', '.join(self.right_key)})",
                 "",
-                *_table(rows),
+                *table(rows),
                 *(
                     [
                         "",
@@ -263,7 +239,7 @@ class CoverageReport:
                 f"{self.name} — {self.dataset}",
                 f"{self.measure} per {self.unit}",
                 "",
-                *_table(rows),
+                *table(rows),
                 *(
                     [
                         "",

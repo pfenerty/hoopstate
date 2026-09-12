@@ -15,6 +15,6 @@ The port is planned in beads under **E10 · Rust port**, in this order:
 Each step is gated on its Python counterpart being correct against the `pbpstats` oracle, and is
 verified by differential test: Python is the reference, Rust must produce byte-identical parquet.
 
-**Before adding `rust/crates/`, read `docs/` on the disk budget.** Local free space is tight and a
+**Before adding `rust/crates/`, read [`docs/disk-budget.md`](../docs/disk-budget.md) and run `python -m hoopstate.footprint`.** Local free space is tight and a
 `target/` directory with these dependencies is the single largest consumer. `[profile.dev] debug = 0`
 is not optional here.
