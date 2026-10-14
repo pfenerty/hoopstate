@@ -1,0 +1,4 @@
+
+# Row-level merge for the beads export (driver: ~/code/common/bin/bd-jsonl-merge,
+# configured globally as merge.beads.driver)
+.beads/issues.jsonl merge=beads
